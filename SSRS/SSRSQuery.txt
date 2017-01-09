@@ -1,0 +1,285 @@
+-- Creating a temp table to house covenant requirement compliance statement dates
+IF OBJECT_ID('tempdb..#LoginLogDays') IS NOT NULL
+DROP TABLE #LoginLogDays
+   
+create table #LoginLogDays ( 
+ LoginDay datetime
+)
+insert into #LoginLogDays ( LoginDay )
+select Distinct
+ cast(floor(cast(SystemDate as float)) as datetime) as 'LoginDay'
+from
+ AppUserLoginLog
+order by
+ cast(floor(cast(SystemDate as float)) as datetime) desc
+ 
+select
+ ld.LoginDay
+ , ltrim(right(convert(varchar(25), aul.SystemDate, 100), 7)) as 'SystemDate'
+ , aul.AppUserKey as 'AppUserKey'
+ , au.AppUserID as 'AppUserID'
+ , au.LoginName as 'AppUserLoginName'
+ , au.FirstName as 'AppUserFirstName'
+ , au.LastName as 'AppUserLastName'
+ , tz.DefaultDescription as 'AppUserTimeZone'
+ , au.email  as 'AppUserEmail'
+ , au.phone as 'AppUserPhone'
+ , rf.RegionalFacilityName as 'AppUserRegionalFacility'
+ , rfg.RegionalFacilityGroupDescription as 'AppUserRegionalFacilityGroup'
+ , sp.DefaultProfileName as 'AppUserSecurityProfile'
+ , (Case
+  When au.ParentEntityCode = 'FND'
+   Then f.BusinessName
+  When 
+   au.ParentEntityCode = 'VDR'
+   or au.ParentEntityCode = 'BRK'
+   Then o.BusinessName
+  Else 'Other'
+  End) as 'AppUserParentCompanyName'
+from
+ #LoginLogDays ld
+ full join AppUserLoginLog aul On ld.LoginDay = cast(floor(cast(aul.SystemDate as float)) as datetime)
+  full join AppUser au On aul.AppUserKey = au.AppUserKey
+   join TimeZone tz On au.TimeZoneID = tz.TimeZoneID
+   join securityprofile sp On au.securityprofilekey = sp.securityprofilekey
+   join RegionalFacility rf On au.DefaultRegionalFacilityKey = rf.RegionalFacilityKey
+   join RegionalFacilityGroup rfg On au.DefaultRegionalFacilityGroupKey = rfg.RegionalFacilityGroupKey
+    left join Funder f On au.ParentEntityID = f.FunderID and au.ParentEntityCode = 'FND'
+    left join OriginatorOrgUnit o On au.ParentEntityID = o.OriginatorID and ( au.ParentEntityCode = 'VDR' or au.ParentEntityCode = 'BRK' )
+    
+where
+ 1 = (Case
+   When IsNull(@DateFrom,0) = 0 Then 1 When IsNull(@DateFrom,0) <> 0 and ld.LoginDay >= @DateFrom Then 1 Else 0 End)
+ and 1 = (Case
+   When IsNull(@DateTo,0) = 0 Then 1 When IsNull(@DateTo,0) <> 0 and ld.LoginDay <= @DateTo Then 1 Else 0 End)
+ and 1 = (Case
+   When @UserName= 'All' Then 1 When rtrim(au.FirstName)+ ' '+ rtrim(au.LastName) = @UserName Then 1 Else 0 End)
+ and au.AppUserID > 100
+order by
+ ld.LoginDay desc
+ , ltrim(right(convert(varchar(25), aul.SystemDate, 100), 7)) asc
+ , au.AppUserID asc
+ 
+-- Creating a temp table to house covenant requirement compliance statement dates
+IF OBJECT_ID('tempdb..#NextExpectedStatement') IS NOT NULL
+DROP TABLE #NextExpectedStatement
+   
+create table #NextExpectedStatement( 
+ CovenantKey int,
+ CovenantRequirementKey int,
+ NextStatement datetime
+)
+insert into #NextExpectedStatement (  CovenantKey, CovenantRequirementKey, NextStatement  )
+select
+ c.CovenantKey
+ , cr.CovenantRequirementKey
+ -- Next Statement Date based on Frequency added to either Covenant Effective Date OR Latest Compliance Date
+ , (Case
+  When max(statement_dd.FullDate) = '1900-01-01 00:00:00.000'
+  Then
+   Case
+    When effective_dd.FullDate = '1900-01-01 00:00:00.000'
+    Then Null
+    When IsNull(effective_dd.FullDate,0) = 0
+    Then Null
+    Else
+     Case
+      When cr.ComplianceFrequencyDescription = 'Monthly' Then DATEADD(month, 1, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Quarterly' Then DATEADD(month, 4, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Annual' Then DATEADD(day, 365, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Semi-Annual' Then DATEADD(day, 730, effective_dd.FullDate)
+      Else Null
+     End     
+   End
+  When IsNull(max(statement_dd.FullDate),0) = 0
+  Then
+   Case
+    When effective_dd.FullDate = '1900-01-01 00:00:00.000'
+    Then Null
+    When IsNull(effective_dd.FullDate,0) = 0
+    Then Null
+    Else
+     Case
+      When cr.ComplianceFrequencyDescription = 'Monthly' Then DATEADD(month, 1, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Quarterly' Then DATEADD(month, 4, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Annual' Then DATEADD(day, 365, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Semi-Annual' Then DATEADD(day, 730, effective_dd.FullDate)
+      Else Null
+     End      
+   End
+  When IsNull(max(statement_dd.FullDate), 0) = 0
+  Then
+   Case
+    When effective_dd.FullDate = '1900-01-01 00:00:00.000'
+    Then Null
+    When IsNull(effective_dd.FullDate,0) = 0
+    Then Null
+    Else
+     Case
+      When cr.ComplianceFrequencyDescription = 'Monthly' Then DATEADD(month, 1, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Quarterly' Then DATEADD(month, 4, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Annual' Then DATEADD(day, 365, effective_dd.FullDate)
+      When cr.ComplianceFrequencyDescription = 'Semi-Annual' Then DATEADD(day, 730, effective_dd.FullDate)
+      Else Null
+     End      
+   End 
+  Else
+   Case
+    When cr.ComplianceFrequencyDescription = 'Monthly' Then DATEADD(month, 1, max(statement_dd.FullDate))
+    When cr.ComplianceFrequencyDescription = 'Quarterly' Then DATEADD(month, 4, max(statement_dd.FullDate))
+    When cr.ComplianceFrequencyDescription = 'Annual' Then DATEADD(day, 365, max(statement_dd.FullDate))
+    When cr.ComplianceFrequencyDescription = 'Semi-Annual' Then DATEADD(day, 730, max(statement_dd.FullDate))
+    Else Null
+   End   
+ End )
+ from COVCovenant c
+  full join COVCovenantRequirement cr On c.CovenantKey = cr.CovenantKey
+  join DateDimension effective_dd On cr.EffectiveDateKey = effective_dd.DateKey
+   full join COVCovenantRequirementCompliance crc On cr.CovenantRequirementKey = crc.CovenantRequirementKey
+   join DateDimension statement_dd on crc.StatementDateKey = statement_dd.DateKey
+ group by c.CovenantKey, cr.covenantrequirementkey, cr.ComplianceFrequencyDescription, effective_dd.FullDate
+-- Begin query
+select
+ c.CovenantKey as 'CovenantKey'
+ , c.CovenantDescription as 'CovenantDescription'
+ , a.LegalName as 'CovenantCustomerName'
+ , ct.TemplateName as 'CovenantTemplateDescription'
+ , (Case
+  When ct.IsFinancialStatement = 1 and ct.HasMultipleRequirements = 1 Then 'Reporting Requirement'
+  When ct.IsFinancialStatement = 0 and ct.HasMultipleRequirements = 1 Then 'Measured Covenant'
+  When ct.IsFinancialStatement = 0 and ct.HasMultipleRequirements = 0 Then 'Non Measured Covenant'
+  End) as 'CovenantTemplateType'
+ , fes.FunderEntityStatusDescription as 'CovenantStatus'
+ , cecpac.PACCount as 'CovenantPACAssociationCount'
+ , (CASE When cecpac.PACCount > 0 Then cecpac.TRNTotalAmountFinanced Else 0 End) as 'CovenantPACTotalTransactionAmount' 
+ , cr.Requirement as 'RequirementDescription'
+ , cr.ComparisonOperatorDescription as 'RequirementComparisonOperator'
+ , cr.ComplianceFrequencyDescription as 'RequirementFrequency'
+ , cr.GraceDaysDescription as 'RequirementGraceDays'
+ , gd.NumberofDays as 'RequirementGraceDaysValue'
+ , cr.RequiredValue as 'RequirementRequiredValue'
+ , lcr.NextStatement as 'RequirementNextExpectedStatement'
+ , DATEDIFF(day,lcr.NextStatement,GETUTCDATE()) as 'RequirementDaysOverdue'
+ , (Case When efdate.FullDate != '1900-01-01 00:00:00.000' Then efdate.FullDate Else Null End) as 'RequirementEffectiveDate'
+ , (Case When enddate.FullDate != '1900-01-01 00:00:00.000' Then enddate.FullDate Else Null End) as 'RequirementEndDate'
+ , crc.CompliantTypeDescription as 'ComplianceResult'
+ , crc.CorrectiveActionTypeDescription as 'ComplianceAction'
+ , crc.DateModified as 'ComplianceModifiedDate'
+ , crc.ExtendedDueDate as 'ComplianceExtendedDueDate'
+ , crc.ComplianceDate as 'ComplianceCreatedDate'
+ , rtrim(crc.FirstName) + ' ' + rtrim(crc.LastName) as 'ComplianceSystemUserName'
+from
+ COVCovenant c
+  join dbo.COVCovenantTemplate ct ON c.CovenantTemplateKEY = ct.CovenantTemplateKEY
+  join Applicant a On c.ApplicantKey = a.ApplicantKey
+  join FunderEntityStatus fes On c.FunderEntityStatusKey = fes.FunderEntityStatusKey
+  full join COVCovenantRequirement cr On c.CovenantKey = cr.CovenantKey
+   Join COVGraceDays gd On cr.GraceDaysKey = gd.GraceDaysKey
+   join DateDimension efdate On cr.EffectiveDateKey = efdate.DateKey
+   join DateDimension enddate On cr.EndDateKey = enddate.DateKey
+  Join #NextExpectedStatement lcr On c.CovenantKey = lcr.CovenantKey and cr.CovenantRequirementKey = lcr.CovenantRequirementKey
+  cross apply (
+   select top 1
+    count(cec.EntityID) as 'PACCount'
+    , sum(ti.AmountFinanced) as 'TRNTotalAmountFinanced'
+   from
+    COVEntityCovenant cec
+     join TransactionInformation ti On cec.EntityCode = 'PAC' and cec.EntityID = ti.ProductPackageID
+   where
+    cec.CovenantKey = c.CovenantKey and cec.EntityCode = 'PAC'
+  ) as cecpac
+  cross apply (
+   select top 1
+    ccrc.CompliantTypeDescription
+    , ccrc.CorrectiveActionTypeDescription
+    , ccrc.DateModified
+    , ccrc.ExtendedDueDate
+    , ccrc.CurrentValue
+    , cdd.FullDate as 'ComplianceDate'
+    , au.FirstName
+    , au.LastName
+   from
+    COVCovenantRequirementCompliance ccrc
+     join AppUser au On ccrc.LogUserKey = au.AppUserKey
+     join DateDimension cdd On ccrc.StatementDateKey = cdd.DateKey
+   where
+    ccrc.CovenantRequirementKey = cr.CovenantRequirementKey
+   order by
+    ccrc.CovenantRequirementComplianceKey desc
+  ) as crc
+where
+ ( fes.FunderEntityStatusDescription <> 'Approved' and fes.FunderEntityStatusDescription <> 'Removed' )
+ and 1 = ( Case When DATEDIFF(day,lcr.NextStatement,GETUTCDATE()) >= @DaysUntilDue*-1 Then 1 Else 0 End)
+ and 1 = ( Case When GETDATE() >= efdate.FullDate Then 1 Else 0 End)
+ and 1 = ( Case When enddate.FullDate='1900-01-01 00:00:00.000' Then 1 When GETDATE() <= enddate.FullDate Then 1 Else 0 End)
+ and 1 = (Case When ct.IsFinancialStatement = 1 and ct.HasMultipleRequirements = 1 then 1 Else 0 End)
+select
+ c.CovenantKey as 'CovenantKey'
+ , c.CovenantDescription as 'CovenantDescription'
+ , a.LegalName as 'CovenantCustomerName'
+ , ct.TemplateName as 'CovenantTemplateDescription'
+ , (Case
+  When ct.IsFinancialStatement = 1 and ct.HasMultipleRequirements = 1 Then 'Reporting Requirement'
+  When ct.IsFinancialStatement = 0 and ct.HasMultipleRequirements = 1 Then 'Measured Covenant'
+  When ct.IsFinancialStatement = 0 and ct.HasMultipleRequirements = 0 Then 'Non Measured Covenant'
+ End) as 'CovenantTemplateType'
+ , fes.FunderEntityStatusDescription as 'CovenantStatus'
+ , cecpac.PACCount as 'CovenantPACAssociationCount'
+ , (CASE When cecpac.PACCount > 0 Then cecpac.TRNTotalAmountFinanced Else 0 End) as 'CovenantPACTotalTransactionAmount' 
+ , cr.Requirement as 'RequirementDescription'
+ , cr.ComparisonOperatorDescription as 'RequirementComparisonOperator'
+ , cr.ComplianceFrequencyDescription as 'RequirementFrequency'
+ , cr.RequiredValue as 'RequirementRequiredValue'
+ , (Case When efdate.FullDate != '1900-01-01 00:00:00.000' Then efdate.FullDate Else Null End) as 'RequirementEffectiveDate'
+ , (Case When enddate.FullDate != '1900-01-01 00:00:00.000' Then enddate.FullDate Else Null End) as 'RequirementEndDate'
+ , crc.CompliantTypeDescription as 'ComplianceResult'
+ , crc.CorrectiveActionTypeDescription as 'ComplianceAction'
+ , crc.DateModified as 'ComplianceModifiedDate'
+ , crc.ExtendedDueDate as 'ComplianceExtendedDueDate'
+ , crc.ComplianceDate as 'ComplianceCreatedDate'
+ , rtrim(crc.FirstName) + ' ' + rtrim(crc.LastName) as 'ComplianceSystemUserName'
+from
+ COVCovenant c
+  join dbo.COVCovenantTemplate ct ON c.CovenantTemplateKEY = ct.CovenantTemplateKEY
+  join Applicant a On c.ApplicantKey = a.ApplicantKey
+  join FunderEntityStatus fes On c.FunderEntityStatusKey = fes.FunderEntityStatusKey
+  full join COVCovenantRequirement cr On c.CovenantKey = cr.CovenantKey
+   join DateDimension efdate On cr.EffectiveDateKey = efdate.DateKey
+   join DateDimension enddate On cr.EffectiveDateKey = enddate.DateKey
+  cross apply (
+   select top 1
+    count(cec.EntityID) as 'PACCount'
+    , sum(ti.AmountFinanced) as 'TRNTotalAmountFinanced'
+   from
+    COVEntityCovenant cec
+     join TransactionInformation ti On cec.EntityCode = 'PAC' and cec.EntityID = ti.ProductPackageID
+   where
+    cec.CovenantKey = c.CovenantKey and cec.EntityCode = 'PAC'
+  ) as cecpac
+  cross apply (
+   select top 1
+    ccrc.CompliantTypeDescription
+    , ccrc.CorrectiveActionTypeDescription
+    , ccrc.DateModified
+    , ccrc.ExtendedDueDate
+    , ccrc.CurrentValue
+    , cdd.FullDate as 'ComplianceDate'
+    , au.FirstName
+    , au.LastName
+   from
+    COVCovenantRequirementCompliance ccrc
+     join AppUser au On ccrc.LogUserKey = au.AppUserKey
+     join DateDimension cdd On ccrc.ComplianceDateKey = cdd.DateKey
+   where
+    ccrc.CovenantRequirementKey = cr.CovenantRequirementKey
+   order by
+    ccrc.CovenantRequirementComplianceKey desc
+  ) as crc
+where
+ crc.CompliantTypeDescription = 'No'
+ and 1 = ( Case When GETDATE() >= efdate.FullDate Then 1 Else 0 End)
+  and 1 = ( Case When enddate.FullDate='1900-01-01 00:00:00.000' Then 1 When GETDATE() <= enddate.FullDate Then 1 Else 0 End)
+ and ( fes.FunderEntityStatusDescription <> 'Approved' and fes.FunderEntityStatusDescription <> 'Removed' )
+ 
+ 
+ 
